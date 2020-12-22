@@ -18,9 +18,10 @@ include_directories(${APACHE_INCLUDE_DIR} ${APR_INCLUDE_DIR})
 # Flags
 #
 set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Wall -Werror -pedantic")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Wall -pedantic")
 
 #
 # Projects
 #
 add_subdirectory(src)
+add_subdirectory(third_party)
