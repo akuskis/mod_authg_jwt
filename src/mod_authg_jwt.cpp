@@ -25,7 +25,7 @@ static int verify_token(request_rec* r, char const* token)
     std::string user;
     std::error_code error_code;
 
-    if (!AuthServer::instance().verify(token, &user, &error_code))
+    if (!AuthServer::instance().verify(token, user, error_code))
     {
         ap_log_rerror(LOG_MARK, APLOG_ERR, 0, r, "Verification issue: %s", error_code.message().c_str());
         return HTTP_UNAUTHORIZED;

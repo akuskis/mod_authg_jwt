@@ -9,22 +9,60 @@
 
 #define LOG_MARK __FILE__, __LINE__, -1
 
-
 namespace
 {
-class TokenErrorCategory : public std::error_category
+int const CALL_DOWN = 60; // seconds
+
+enum class AuthError {
+    ok = 0,
+    base_64_decoding_failed,
+    token_is_invalid,
+    unknown_key,
+    cant_get_new_keys,
+};
+
+std::error_category const& auth_error_category()
 {
-public:
-    [[nodiscard]] const char* name() const noexcept override
+    class AuthErrorCategory : public std::error_category
     {
-        return "Token Error";
+    public:
+        [[nodiscard]] const char* name() const noexcept override
+        {
+            return "Auth Error";
+        };
+
+        [[nodiscard]] std::string message(int index) const override
+        {
+            switch (static_cast<AuthError>(index))
+            {
+            case AuthError::ok:
+                return "no error";
+
+            case AuthError::base_64_decoding_failed:
+                return "Base64 decoding failed or invalid json";
+
+            case AuthError::token_is_invalid:
+                return "Token is not in correct format";
+
+            case AuthError::unknown_key:
+                return "Signed by unknown key";
+
+            case AuthError::cant_get_new_keys:
+                return "Can't get new keys from the server";
+
+            default:
+                return "unknown type of error";
+            }
+        }
     };
 
-    [[nodiscard]] std::string message(int /* index */) const override
-    {
-        return "Key ID is not known";
-    }
-};
+    static AuthErrorCategory const category;
+    return category;
+}
+
+std::error_code make_error_code(AuthError auth_error){
+    return std::error_code{static_cast<int>(auth_error), auth_error_category()};
+}
 
 size_t writeCallback(char* content, size_t size, size_t nmb, void* u)
 {
@@ -96,26 +134,80 @@ AuthServer& AuthServer::instance()
     return authServer;
 }
 
-bool AuthServer::verify(char const* token, std::string* user, std::error_code* error_code)
+bool AuthServer::verify(char const* token, std::string& user, std::error_code& error_code)
 {
-    auto decoded = jwt::decode(token);
-
-    auto cert = known_keys_.find(decoded.get_key_id());
-    if (cert == known_keys_.cend())
+    try
     {
-        *error_code = std::error_code{0, TokenErrorCategory{}};
-        return false;
+        auto decoded = jwt::decode(token);
+        auto const key = getKey(decoded.get_key_id(), error_code);
+
+        if (error_code)
+            return !error_code;
+
+        auto verifier = jwt::verify()
+            .allow_algorithm(jwt::algorithm::rs256{key})
+            .with_issuer(configuration.issuer)
+            .with_audience(configuration.client_id);
+
+        verifier.verify(decoded, error_code);
+        user = decoded.get_payload_claim("email").as_string();
+    }
+    catch (std::invalid_argument&)
+    {
+        error_code = make_error_code(AuthError::token_is_invalid);
+    }
+    catch (std::runtime_error&)
+    {
+        error_code = make_error_code(AuthError::base_64_decoding_failed);
     }
 
-    auto verifier = jwt::verify()
-                        .allow_algorithm(jwt::algorithm::rs256{cert->second})
-                        .with_issuer(configuration.issuer)
-                        .with_audience(configuration.client_id);
+    return !error_code;
+}
 
-    verifier.verify(decoded, *error_code);
-    *user = decoded.get_payload_claim("email").as_string();
+std::string AuthServer::findKey(std::string const& id) const
+{
+    auto const cert = known_keys_.find(id);
+    if (cert == known_keys_.cend())
+        return "";
 
-    return !(*error_code);
+    return cert->second;
+}
+
+std::error_code AuthServer::downloadKeys()
+{
+    auto current_time = time(nullptr);
+    if (current_time - last_request_ < CALL_DOWN)
+        return make_error_code(AuthError::unknown_key);
+
+    last_request_ = current_time;
+    auto const newKeys = getKeys();
+    if (newKeys.empty())
+        return make_error_code(AuthError::cant_get_new_keys);
+
+    if (newKeys == known_keys_)
+        return make_error_code(AuthError::unknown_key);
+
+    known_keys_ = newKeys;
+    return make_error_code(AuthError::ok);
+}
+
+std::string AuthServer::getKey(std::string const& id, std::error_code& error_code)
+{
+    std::lock_guard<std::mutex> lock_guard(mutex_);
+
+    auto key = findKey(id);
+    if (key.empty())
+    {
+        error_code = downloadKeys();
+        if (!error_code)
+        {
+            key = findKey(id);
+            if (key.empty())
+                error_code = make_error_code(AuthError::unknown_key);
+        }
+    }
+
+    return key;
 }
 
 std::map<std::string, std::string> AuthServer::getKeys() const
