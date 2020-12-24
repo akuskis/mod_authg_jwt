@@ -10,6 +10,7 @@ struct Configuration
 {
     const char* client_id;
     const char* issuer;
+    const char* server_url;
 };
 
 extern struct Configuration configuration;

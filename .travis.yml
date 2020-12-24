@@ -1,0 +1,32 @@
+sudo: false
+
+language: cpp
+os: linux
+dist: focal
+compiler: gcc
+
+# as Travis got some issues with git submodules
+git:
+  submodules: false
+before_install:
+  - sed -i 's/git@github.com:/https:\/\/github.com\//' .gitmodules
+  - git submodule update --init --recursive
+
+addons:
+  apt:
+    packages:
+      - gcc-10
+      - g++-10
+      - cmake
+      - apache2-dev
+      - libcurl4-openssl-dev
+
+branches:
+  only:
+    - master
+
+jobs:
+  include:
+    - stage: Compile
+      name: 'Compile'
+      script: mkdir build && cd build && cmake .. && make mod_authg_jwt

@@ -1,17 +1,18 @@
 #include "AuthServer.hpp"
 
 #include "Configuration.h"
+#include "Log.hpp"
 
 #include <curl/curl.h>
-#include <http_log.h>
 #include <jwt-cpp/jwt.h>
+#include <map>
+#include <mutex>
 #include <rapidjson/document.h>
 
-#define LOG_MARK __FILE__, __LINE__, -1
 
 namespace
 {
-int const CALL_DOWN = 60; // seconds
+int const CALL_DOWN = 60 /* seconds */;
 
 enum class AuthError {
     ok = 0,
@@ -60,7 +61,8 @@ std::error_category const& auth_error_category()
     return category;
 }
 
-std::error_code make_error_code(AuthError auth_error){
+std::error_code make_error_code(AuthError auth_error)
+{
     return std::error_code{static_cast<int>(auth_error), auth_error_category()};
 }
 
@@ -114,13 +116,68 @@ std::map<std::string, std::string> extractKeys(std::string const& content)
 
     return keys;
 }
+
+std::map<std::string, std::string> getKeysFromServer()
+{
+    return extractKeys(getContent(configuration.server_url));
+}
 } // namespace
 
+class AuthServer::Impl
+{
+public:
+    [[nodiscard]] std::string getKey(std::string const& id, std::error_code& error_code)
+    {
+        std::lock_guard<std::mutex> lock_guard(mutex_);
+
+        auto key = findKey(id);
+        if (key.empty())
+        {
+            error_code = downloadKeys();
+            if (!error_code)
+            {
+                key = findKey(id);
+                if (key.empty())
+                    error_code = make_error_code(AuthError::unknown_key);
+            }
+        }
+
+        return key;
+    }
+private:
+    std::map<std::string, std::string> known_keys_;
+    time_t last_request_ = 0;
+    std::mutex mutex_;
+
+    [[nodiscard]] std::string findKey(std::string const& id) const
+    {
+        auto const cert = known_keys_.find(id);
+        if (cert == known_keys_.cend())
+            return "";
+
+        return cert->second;
+    }
+
+    [[nodiscard]] std::error_code downloadKeys()
+    {
+        auto current_time = time(nullptr);
+        if (current_time - last_request_ < CALL_DOWN)
+            return make_error_code(AuthError::unknown_key);
+
+        last_request_ = current_time;
+        auto new_keys = getKeysFromServer();
+        if (new_keys.empty())
+            return make_error_code(AuthError::cant_get_new_keys);
+
+        known_keys_ = new_keys;
+        return make_error_code(AuthError::ok);
+    }
+};
+
 AuthServer::AuthServer()
+  : impl_(new Impl{})
 {
     curl_global_init(CURL_GLOBAL_DEFAULT);
-
-    known_keys_ = getKeys();
 }
 
 AuthServer::~AuthServer()
@@ -130,8 +187,8 @@ AuthServer::~AuthServer()
 
 AuthServer& AuthServer::instance()
 {
-    static AuthServer authServer;
-    return authServer;
+    static AuthServer auth_server;
+    return auth_server;
 }
 
 bool AuthServer::verify(char const* token, std::string& user, std::error_code& error_code)
@@ -139,15 +196,15 @@ bool AuthServer::verify(char const* token, std::string& user, std::error_code& e
     try
     {
         auto decoded = jwt::decode(token);
-        auto const key = getKey(decoded.get_key_id(), error_code);
+        auto const key = impl_->getKey(decoded.get_key_id(), error_code);
 
         if (error_code)
             return !error_code;
 
         auto verifier = jwt::verify()
-            .allow_algorithm(jwt::algorithm::rs256{key})
-            .with_issuer(configuration.issuer)
-            .with_audience(configuration.client_id);
+                            .allow_algorithm(jwt::algorithm::rs256{key})
+                            .with_issuer(configuration.issuer)
+                            .with_audience(configuration.client_id);
 
         verifier.verify(decoded, error_code);
         user = decoded.get_payload_claim("email").as_string();
@@ -162,55 +219,4 @@ bool AuthServer::verify(char const* token, std::string& user, std::error_code& e
     }
 
     return !error_code;
-}
-
-std::string AuthServer::findKey(std::string const& id) const
-{
-    auto const cert = known_keys_.find(id);
-    if (cert == known_keys_.cend())
-        return "";
-
-    return cert->second;
-}
-
-std::error_code AuthServer::downloadKeys()
-{
-    auto current_time = time(nullptr);
-    if (current_time - last_request_ < CALL_DOWN)
-        return make_error_code(AuthError::unknown_key);
-
-    last_request_ = current_time;
-    auto const newKeys = getKeys();
-    if (newKeys.empty())
-        return make_error_code(AuthError::cant_get_new_keys);
-
-    if (newKeys == known_keys_)
-        return make_error_code(AuthError::unknown_key);
-
-    known_keys_ = newKeys;
-    return make_error_code(AuthError::ok);
-}
-
-std::string AuthServer::getKey(std::string const& id, std::error_code& error_code)
-{
-    std::lock_guard<std::mutex> lock_guard(mutex_);
-
-    auto key = findKey(id);
-    if (key.empty())
-    {
-        error_code = downloadKeys();
-        if (!error_code)
-        {
-            key = findKey(id);
-            if (key.empty())
-                error_code = make_error_code(AuthError::unknown_key);
-        }
-    }
-
-    return key;
-}
-
-std::map<std::string, std::string> AuthServer::getKeys() const
-{
-    return extractKeys(getContent("https://www.googleapis.com/oauth2/v1/certs"));
 }
