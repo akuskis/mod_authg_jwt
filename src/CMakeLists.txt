@@ -5,4 +5,4 @@ set(SOURCES
         )
 
 add_library(${PROJECT_NAME} SHARED ${SOURCES})
-target_link_libraries(${PROJECT_NAME} jwt-cpp curl RapidJSON)
+target_link_libraries(${PROJECT_NAME} jwt-cpp curl RapidJSON cppcodec)

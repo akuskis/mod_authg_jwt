@@ -3,7 +3,6 @@
 #include <memory>
 #include <system_error>
 
-
 class AuthServer
 {
 public:
