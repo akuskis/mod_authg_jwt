@@ -79,6 +79,15 @@ size_t writeCallback(char* content, size_t size, size_t nmb, void* u)
     return size * nmb;
 }
 
+static int exact_stricmp(const char *a, const char *b) {
+  int ca, cb;
+  do {
+     ca = (unsigned char) *a++;
+     cb = (unsigned char) *b++;
+   } while (ca == cb && ca != '\0');
+   return ca - cb;
+}
+
 std::string getContent(char const* url)
 {
     std::string buffer;
@@ -131,7 +140,7 @@ std::string getRSAPublicKeyInPEMFormat(std::string_view nnInBase64UrlUnpadded, s
 std::map<std::string, std::string> extractKeysFromJWKS(rapidjson::Document const& document ){
     std::map<std::string, std::string> keys;
     ap_log_error(LOG_MARK, APLOG_INFO, 0, nullptr, "We have JWK Format");
-    // we have to convert JWK data to pem's -> exponent and modulo required for RS256 which is the only supported algo as of today
+    // we have to convert JWK data to pem's -> exponent and modulo required for RS256/RS512 which is the only supported algo as of today
     const char* KEYS_MEMBER = "keys";
     if(!document.HasMember(KEYS_MEMBER) && document[KEYS_MEMBER].IsArray()){
         // not RFC compliant
@@ -330,18 +339,36 @@ bool AuthServer::verify(char const* token, std::string& user, std::error_code& e
     {
         auto decoded = jwt::decode(token);
 
+        const char* alg = decoded.get_algorithm().c_str();
+
+        // check algo before doing more expensive work
+        if(!(exact_stricmp("RS256", alg) || exact_stricmp("RS512", alg))){
+            ap_log_error(LOG_MARK, APLOG_ERR, 0, nullptr, "Sent JWT is signed by alg %s but we only support RS256 and RS512. Rejecting.", alg);
+            return false;
+        }
+
         std::string pem_key = impl_->getKey(decoded, error_code);
 
         if (error_code)
             return !error_code;
 
+
+        jwt::algorithm::rsa* algorithm = NULL;
+        if(exact_stricmp("RS512", alg)){
+            algorithm = new jwt::algorithm::rs512{pem_key};
+        } else{
+            algorithm = new jwt::algorithm::rs256{pem_key};
+        }
+
         auto verifier = jwt::verify()
-                            .allow_algorithm(jwt::algorithm::rs256{pem_key})
+                            .allow_algorithm(*algorithm)
                             .with_issuer(configuration.issuer)
                             .with_audience(configuration.client_id);
 
         verifier.verify(decoded, error_code);
 
+        if (error_code)
+            return !error_code;
 
         if (configuration.user_claim)
         {

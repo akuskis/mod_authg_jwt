@@ -1,7 +1,7 @@
 # mod_authg_jwt
 [![Build Status](https://travis-ci.org/akuskis/mod_authg_jwt.svg?branch=master)](https://travis-ci.org/akuskis/mod_authg_jwt)
 
-Authentication module for Apache to verify JWT of Google OAuth2 or any other OIDC/oAuth2 compliant Identity Provider (Supports only RS256).
+Authentication module for Apache to verify JWT of Google OAuth2 or any other OIDC/oAuth2 compliant Identity Provider (Supports only RS256 / RS512).
 
 Verify JWT token and reject requests with invalid tokens with 401.
 If it gets a JWT signed by an unknown key ID, then the mod will request the key from the identity provider / AuthServer. (Cool down of 60 seconds).
@@ -47,7 +47,27 @@ Where the configuration options are:
 
 Note to enable this mod for your location, AuthType JWT must be configured.
 
-## Build on host
+## Build on host (for Ubuntu, GNU Linux, etc)
+
+Prepare environment:
+```shell script
+sudo apt install build-essential cmake apache2-dev libcurl4-openssl-dev
+```
+
+Get sources:
+```shell script
+git clone git@github.com:akuskis/mod_authg_jwt.git
+cd mod_authg_jwt
+git submodule update --init --recursive
+```
+
+Build sources:
+```shell script
+mkdir build && cd build
+cmake .. && make mod_authg_jwt
+```
+
+## Build on host (for Red Hat Enterprise Linux and similar)
 
 Prepare environment:
 ```shell script
