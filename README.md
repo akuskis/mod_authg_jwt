@@ -69,19 +69,46 @@ cmake .. && make mod_authg_jwt
 
 ## Build on host (for Red Hat Enterprise Linux and similar)
 
-Prepare environment:
+### Prepare for git
 ```shell script
-sudo apt install build-essential cmake apache2-dev libcurl4-openssl-dev
+sudo yum install git
 ```
 
-Get sources:
+### Get sources and sub-modules from git
 ```shell script
-git clone git@github.com:akuskis/mod_authg_jwt.git
+git clone https://github.com/akuskis/mod_authg_jwt.git
 cd mod_authg_jwt
 git submodule update --init --recursive
 ```
 
-Build sources:
+### prepare environemnt
+Install cmake:
+```shell script
+sudo yum install cmake
+```
+Note if you have an old cmake version in your distribution you will have to manually install cmake 3.16. or higher.
+```shell script
+sudo yum remove cmake
+cd /opt
+sudo wget https://github.com/Kitware/CMake/releases/download/v3.21.4/cmake-3.21.4-linux-x86_64.sh
+sudo sh ./cmake-3.21.4-linux-x86_64.sh
+sudo ln -s /opt/cmakeke-3.21.4-linux-x86_64/bin/* /usr/local/bin
+cmake -version
+```
+
+Install development dependencies
+```shell script
+sudo yum groupinstall 'Development Tools'
+sudo yum install httpd-devel
+```
+
+to make cmake happy, make sure there exists an apxs2
+```shell script
+sudo cp /usr/bin/apxs /usr/sbin/apxs2
+```
+
+### Build sources
+change to the source directory (.../mod_authg_jwt)
 ```shell script
 mkdir build && cd build
 cmake .. && make mod_authg_jwt
