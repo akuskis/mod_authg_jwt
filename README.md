@@ -12,7 +12,7 @@ Supports server endpoints
 
 
 ## Simple setup
-The following configuration is due in the apache main configuration (e.g. apache2.conf, httpd.conf or similar).
+The following configuration is due in the apache main configuration (e.g. apache2.conf, httpd.conf or similar, e.g. /etc/apache2/apache2.conf).
 
 Module loading:
 ```
@@ -46,6 +46,14 @@ Where the configuration options are:
 - UserClaim: The claim identifying the user. Typical options are email, sub. Defaults to email.
 
 Note to enable this mod for your location, AuthType JWT must be configured.
+
+Note also: You will have to restart apache with a command such as
+```shell script
+sudo systemctl restart apache2
+```
+after configuration.
+
+Note: If authentication does not work as expected see the apache error log (e.g. /var/log/apache2/error.log) for hints on what is wrong with the configuration / received JWT.
 
 ## Build on host (for Ubuntu, GNU Linux, etc)
 

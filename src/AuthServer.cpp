@@ -342,7 +342,7 @@ bool AuthServer::verify(char const* token, std::string& user, std::error_code& e
         const char* alg = decoded.get_algorithm().c_str();
 
         // check algo before doing more expensive work
-        if(!(exact_stricmp("RS256", alg) || exact_stricmp("RS512", alg))){
+        if(!(exact_stricmp("RS256", alg) == 0 || exact_stricmp("RS512", alg) == 0)){
             ap_log_error(LOG_MARK, APLOG_ERR, 0, nullptr, "Sent JWT is signed by alg %s but we only support RS256 and RS512. Rejecting.", alg);
             return false;
         }
@@ -352,18 +352,17 @@ bool AuthServer::verify(char const* token, std::string& user, std::error_code& e
         if (error_code)
             return !error_code;
 
-
-        jwt::algorithm::rsa* algorithm = NULL;
-        if(exact_stricmp("RS512", alg)){
-            algorithm = new jwt::algorithm::rs512{pem_key};
-        } else{
-            algorithm = new jwt::algorithm::rs256{pem_key};
-        }
-
         auto verifier = jwt::verify()
-                            .allow_algorithm(*algorithm)
                             .with_issuer(configuration.issuer)
                             .with_audience(configuration.client_id);
+
+        // creating correct algo for verifier.
+        ap_log_error(LOG_MARK, APLOG_DEBUG, 0, nullptr, "We have algo %s.", alg);
+        if(exact_stricmp("RS512", alg) == 0){
+            verifier.allow_algorithm(jwt::algorithm::rs512{pem_key});
+         } else{
+            verifier.allow_algorithm(jwt::algorithm::rs256{pem_key});
+        }      
 
         verifier.verify(decoded, error_code);
 
@@ -373,14 +372,14 @@ bool AuthServer::verify(char const* token, std::string& user, std::error_code& e
         if (configuration.user_claim)
         {
             // TODO: LOG-LEVEL??
-            ap_log_error(LOG_MARK, APLOG_ERR, 0, nullptr, "Setting user to claim %s with value %s.", configuration.user_claim, decoded.get_payload_claim(configuration.user_claim).as_string().c_str());
+            ap_log_error(LOG_MARK, APLOG_DEBUG, 0, nullptr, "Setting user to claim %s with value %s.", configuration.user_claim, decoded.get_payload_claim(configuration.user_claim).as_string().c_str());
 
             user = decoded.get_payload_claim(configuration.user_claim).as_string();
         }
         else
         {
             // TODO: LOG-LEVEL??
-            ap_log_error(LOG_MARK, APLOG_ERR, 0, nullptr, "Default: Setting user to claim email with value %s.", decoded.get_payload_claim("email").as_string().c_str());
+            ap_log_error(LOG_MARK, APLOG_DEBUG, 0, nullptr, "Default: Setting user to claim email with value %s.", decoded.get_payload_claim("email").as_string().c_str());
 
             // defaults to email
             user = decoded.get_payload_claim("email").as_string();
