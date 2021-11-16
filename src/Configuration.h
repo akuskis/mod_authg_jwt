@@ -26,6 +26,8 @@ struct Configuration
     const char* key_format;
     // The claim that identifies the user. Typical options: sub, email. defaults to email.
     const char* user_claim;
+    // The minumal amount of seconds to wait before the jku / server_url is queried again for new keys. Defaults to 60s. May be set to 0 to always query when a key is not found.
+    int min_refresh_wait;
 };
 
 extern struct Configuration configuration;

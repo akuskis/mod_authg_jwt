@@ -29,6 +29,7 @@ Configuring the module:
     AuthServerAllowInsecureJku false
     AuthServerKeyFormat cert
     UserClaim email
+    MinKeyRefreshWait 30
 
     <Location /api/>
         AuthType JWT
@@ -44,6 +45,7 @@ Where the configuration options are:
 - AuthServerAllowInsecureJku: For test environments only. Allows jku using insecure http urls. Does not do hostcheck of jku when no hosts are configured. Defaults to false.
 - AuthServerKeyFormat: The format how the AuthServer provides the signing keys. Options: jwk (server provides a JWK Set), cert (Server provides certificates or public key PEMs). Defaults to cert.
 - UserClaim: The claim identifying the user. Typical options are email, sub. Defaults to email.
+- MinKeyRefreshWait: Requests the jku or AuthServer url only when there was no call for the last MinKeyRefreshWait seconds. Defaults to 60. Set to 0 to always query when the key was noz found in the local cache.
 
 Note to enable this mod for your location, AuthType JWT must be configured.
 
@@ -75,7 +77,7 @@ mkdir build && cd build
 cmake .. && make mod_authg_jwt
 ```
 
-## Build on host (for Red Hat Enterprise Linux and similar)
+## Build on host (for Red Hat Enterprise Linux)
 
 ### Prepare for git
 ```shell script
@@ -100,25 +102,54 @@ sudo yum remove cmake
 cd /opt
 sudo wget https://github.com/Kitware/CMake/releases/download/v3.21.4/cmake-3.21.4-linux-x86_64.sh
 sudo sh ./cmake-3.21.4-linux-x86_64.sh
-sudo ln -s /opt/cmakeke-3.21.4-linux-x86_64/bin/* /usr/local/bin
+sudo ln -s /opt/cmake-3.21.4-linux-x86_64/bin/* /usr/local/bin
+sudo ln -s /opt/cmake-3.21.4-linux-x86_64/bin/* /usr/bin
 cmake -version
 ```
 
-Install development dependencies
+Install development dependencies:
+This requires you to have a gcc compiler that supports C++ 17 features. If you are still on RHEL 7.x or below you will for sure require the RedHat devtool-chain. This requires you to have a (free for individuals) RedHat subscription.
+(Note if you have a new RHEL-Version it might be sufficient to install "sudo yum groupinstall 'Development Tools'" instead of the toolchain. Check your gcc version.)
+
+Here you can register for the RedHat developer program: https://developers.redhat.com/register .
+Then you can see how to use the developer toolset: https://access.redhat.com/solutions/472793
+See how to get your system registered: https://access.redhat.com/documentation/en-us/red_hat_subscription_management/1/html/quick_registration_for_rhel/index . For me this was simply "sudo subscription-manager register".
+Then assign a subscription: https://access.redhat.com/solutions/776723
+And add the repositories required: https://access.redhat.com/documentation/en-us/red_hat_developer_toolset/11/html/user_guide/chap-red_hat_developer_toolset#sect-Red_Hat_Developer_Toolset-Subscribe-RHSCL . For me this was "sudo subscription-manager repos --enable rhel-7-server-optional-rpms", "sudo subscription-manager repos --enable rhel-7-server-optional-debug-rpms" and "sudo subscription-manager repos --enable rhel-7-server-optional-source-rpms
+
+and then you are finaly ready to install
 ```shell script
-sudo yum groupinstall 'Development Tools'
+sudo yum install devtoolset-11
 sudo yum install httpd-devel
+sudo yum install openssl-devel libcurl-devel.x86_64
 ```
 
-to make cmake happy, make sure there exists an apxs2
+to make cmake happy, make sure there exists an apxs2. If it does not, execute the following:
 ```shell script
 sudo cp /usr/bin/apxs /usr/sbin/apxs2
 ```
 
 ### Build sources
-change to the source directory (.../mod_authg_jwt)
+
+If you installed the devtoolset, make sure you enable it for the following by executing
+```shell script
+sudo scl enable devtoolset-11 'bash'
+```
+
+change to the source directory (.../mod_authg_jwt) and create the build folder:
 ```shell script
 mkdir build && cd build
+```
+
+Now compile:
+If you are on the devtoolset compile like this:
+```shell script
+export CC=/opt/rh/devtoolset-11/root/usr/bin/gcc 
+export CXX=/opt/rh/devtoolset-11/root/usr/bin/g++
+cmake .. && make mod_authg_jwt
+```
+if you are on the standard gcc you may simpliy use:
+```shell script
 cmake .. && make mod_authg_jwt
 ```
 

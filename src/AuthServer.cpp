@@ -13,7 +13,6 @@
 
 namespace
 {
-int const CALL_DOWN = 60 /* seconds */;
 std::string const JWT_JKU_HEADER_NAME = "jku";
 std::string const JWK_KEY_FORMAT = "jwk";
 
@@ -121,7 +120,15 @@ std::string getRSAPublicKeyInPEMFormat(std::string_view nnInBase64UrlUnpadded, s
     BIGNUM* modul = BN_bin2bn(nnBin.data(),nnBin.size(),NULL);
     BIGNUM* expon = BN_bin2bn(eeBin.data(),eeBin.size(),NULL);
     RSA* rr = RSA_new();
+#if defined(LWS_HAVE_RSA_SET0_KEY)
     RSA_set0_key(rr, modul, expon, NULL);
+#else
+	rr->e = expon;
+	rr->n = modul;
+	rr->d = NULL;
+	rr->p = NULL;
+	rr->q = NULL;
+#endif
     BIO *mem = BIO_new(BIO_s_mem());
     PEM_write_bio_RSA_PUBKEY(mem, rr);
     BUF_MEM *bptr;
@@ -303,7 +310,7 @@ private:
     [[nodiscard]] std::error_code downloadKeys(const char* url)
     {
         auto current_time = time(nullptr);
-        if (current_time - last_request_ < CALL_DOWN)
+        if (current_time - last_request_ < configuration.min_refresh_wait)
             return make_error_code(AuthError::unknown_key);
 
         last_request_ = current_time;

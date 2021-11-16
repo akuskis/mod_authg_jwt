@@ -1,3 +1,5 @@
+#include <linux/version.h>
+
 #include "AuthServer.hpp"
 #include "Configuration.h"
 #include "Log.hpp"
@@ -57,5 +59,11 @@ static void register_hooks(apr_pool_t* /* pool */)
     ap_hook_check_authn(auth_check_jwt_hook, nullptr, nullptr, APR_HOOK_MIDDLE, AP_AUTH_INTERNAL_PER_CONF);
 }
 
-[[maybe_unused]] module AP_MODULE_DECLARE_DATA authg_jwt_module
+#ifdef RHEL_MAJOR
+ // at least RHEL 7.9 and earlier have one parameter less
+ [[maybe_unused]] module AP_MODULE_DECLARE_DATA authg_jwt_module
+    = {STANDARD20_MODULE_STUFF, nullptr, nullptr, nullptr, nullptr, configuration_directives, register_hooks};
+#else
+ [[maybe_unused]] module AP_MODULE_DECLARE_DATA authg_jwt_module
     = {STANDARD20_MODULE_STUFF, nullptr, nullptr, nullptr, nullptr, configuration_directives, register_hooks, 0};
+#endif

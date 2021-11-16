@@ -2,6 +2,7 @@
 #include <string.h>
 #include <stdbool.h>
 #include <ctype.h>
+#include <inttypes.h>
 
 struct Configuration configuration;
 
@@ -111,6 +112,17 @@ static const char* set_user_claim(cmd_parms* cmd, void* cfg, const char* arg)
     return NULL;
 }
 
+static const char* set_min_refresh_wait(cmd_parms* cmd, void* cfg, const char* arg)
+{
+    if(arg==NULL){
+        configuration.min_refresh_wait = 60;
+    } else {
+        char* endptr;
+        configuration.min_refresh_wait = strtoimax(arg,&endptr,10);
+    }
+    return NULL;
+}
+
 const command_rec configuration_directives[]
     = {AP_INIT_TAKE1("AuthClientID", set_auth_client_id, NULL, RSRC_CONF, "Required Audience/Client ID in the JWT. Defaults to null (=not checked)."),
        AP_INIT_TAKE1("AuthIssuer", set_auth_issuer, NULL, RSRC_CONF, "Required Issuer in the JWT. Defaults to null (=not checked)."),
@@ -120,4 +132,5 @@ const command_rec configuration_directives[]
        AP_INIT_TAKE1("AuthServerKeyFormat", set_key_format, NULL, RSRC_CONF, "Key format. Options jwk (=rfc 7517/JWK format), cert (=pem format). Defaults to cert."),
        AP_INIT_TAKE1("AuthServerAllowInsecureJku", set_allow_insecure_jku, NULL, RSRC_CONF, "Ignores host verification of jku when trusted_hosts are not defined. Allows http jku. Only use in test environments. Defaults to false."),
        AP_INIT_TAKE1("UserClaim", set_user_claim, NULL, RSRC_CONF, "The JWT claim containing the user identity. Typical options: sub, email. Defaults to email when null."),
+       AP_INIT_TAKE1("MinKeyRefreshWait", set_min_refresh_wait, NULL, RSRC_CONF, "The minumal amount of seconds to wait before the jku resp. server_url is queried again for new keys. Defaults to 60s. May be set to 0 to always query when a key is not found."),
        {NULL}};
