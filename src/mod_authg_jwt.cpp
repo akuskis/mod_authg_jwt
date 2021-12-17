@@ -12,12 +12,16 @@ namespace
 char const* AUTH_PREFIX = "Bearer ";
 int const AUTH_PREFIX_LEN = strlen(AUTH_PREFIX);
 
+// Note: when using standard singleton pattern for C++ Apache never the less instanciates
+// the Singleton multiple times. That's why we need a global here.
+static AuthServer authServer;
+
 int verify_token(request_rec* r, char const* token)
 {
     std::string user;
     std::error_code error_code;
 
-    if (!AuthServer::instance().verify(token, user, error_code))
+    if (!authServer.verify(token, user, error_code))
     {
         ap_log_rerror(LOG_MARK, APLOG_ERR, 0, r, "Verification issue: %s", error_code.message().c_str());
         return HTTP_UNAUTHORIZED;
@@ -60,10 +64,10 @@ static void register_hooks(apr_pool_t* /* pool */)
 }
 
 #ifdef RHEL_MAJOR
- // at least RHEL 7.9 and earlier have one parameter less
- [[maybe_unused]] module AP_MODULE_DECLARE_DATA authg_jwt_module
+// at least RHEL 7.9 and earlier have one parameter less
+[[maybe_unused]] module AP_MODULE_DECLARE_DATA authg_jwt_module
     = {STANDARD20_MODULE_STUFF, nullptr, nullptr, nullptr, nullptr, configuration_directives, register_hooks};
 #else
- [[maybe_unused]] module AP_MODULE_DECLARE_DATA authg_jwt_module
+[[maybe_unused]] module AP_MODULE_DECLARE_DATA authg_jwt_module
     = {STANDARD20_MODULE_STUFF, nullptr, nullptr, nullptr, nullptr, configuration_directives, register_hooks, 0};
 #endif
