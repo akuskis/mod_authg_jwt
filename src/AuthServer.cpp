@@ -414,7 +414,7 @@ private:
         if (new_keys.empty())
             return make_error_code(AuthError::cant_get_new_keys);
 
-        known_keys_ = new_keys;
+        known_keys_.insert(new_keys.begin(), new_keys.end());
         return make_error_code(AuthError::ok);
     }
 };
