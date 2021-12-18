@@ -13,7 +13,8 @@ char const* AUTH_PREFIX = "Bearer ";
 int const AUTH_PREFIX_LEN = strlen(AUTH_PREFIX);
 
 // Note: when using standard singleton pattern for C++ Apache never the less instanciates
-// the Singleton multiple times. That's why we need a global here.
+// the Singleton multiple times as there are forked processes eacvh running a MOD.
+// That's why we better use a global here.
 static AuthServer authServer;
 
 int verify_token(request_rec* r, char const* token)

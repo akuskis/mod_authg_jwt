@@ -320,13 +320,10 @@ public:
     }
 
 private:
-    // Note: As Apache is forking child processes at will, the instance variables are of minor impportance
-    // When a request arrives a new child is forked, thsi contains a copy of the originally initialized
-    // object. And the call is loading the keys from scratch.
-    // Now when we have a quick succession of calls that forked process may be re-used by apache and we
-    // finally profit from below functionality (caching).
-    // However, when for some time no request is made, the forked child is destroyed and the next call
-    // gets another foked child process and has to initiallize again.
+    // Note: As Apache is forking child processes at will, there are multiple instances
+    // of the MOD /a AuthServer running. So you will get other instances for requests
+    // after a few seconds. This means, that you will have to select the config values
+    // carefully.
     // The only way to prevent this is:
     // a) prevent forking in apache configuration -> get performance issues for user
     // or b) use shared memory or similar -> lots of work only to be done when having issues.
