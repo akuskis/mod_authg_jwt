@@ -1,14 +1,18 @@
 #include "AuthServer.hpp"
 
 #include "Configuration.h"
-#include "Log.hpp"
 
 #include <cppcodec/base64_url_unpadded.hpp>
 #include <curl/curl.h>
+#include <http_log.h>
 #include <jwt-cpp/jwt.h>
 #include <map>
 #include <mutex>
 #include <rapidjson/document.h>
+
+#ifdef APLOG_USE_MODULE
+APLOG_USE_MODULE(authg_jwt);
+#endif
 
 namespace
 {
@@ -90,14 +94,14 @@ static int exact_stricmp(const char* a, const char* b)
     return ca - cb;
 }
 
-std::string getContent(char const* url)
+std::string getContent(request_rec* r, char const* url)
 {
     std::string buffer;
     CURL* curl = curl_easy_init();
 
     if (curl)
     {
-        ap_log_error(LOG_MARK, APLOG_DEBUG, 0, nullptr, "curl_easy_perform() on url: %s\n", url);
+        ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "curl_easy_perform() on url: %s\n", url);
         curl_easy_setopt(curl, CURLOPT_URL, url);
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writeCallback);
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buffer);
@@ -106,7 +110,7 @@ std::string getContent(char const* url)
 
         if (res != CURLE_OK)
         {
-            ap_log_error(LOG_MARK, APLOG_ERR, 0, nullptr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
+            ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
             buffer.clear();
         }
 
@@ -116,7 +120,8 @@ std::string getContent(char const* url)
     return buffer;
 }
 
-std::string getRSAPublicKeyInPEMFormat(std::string_view nnInBase64UrlUnpadded, std::string_view eeInBase64UrlUnpadded)
+std::string getRSAPublicKeyInPEMFormat(request_rec* r, std::string_view nnInBase64UrlUnpadded,
+                                       std::string_view eeInBase64UrlUnpadded)
 {
     auto nnBin = cppcodec::base64_url_unpadded::decode(nnInBase64UrlUnpadded);
     auto eeBin = cppcodec::base64_url_unpadded::decode(eeInBase64UrlUnpadded);
@@ -142,27 +147,27 @@ std::string getRSAPublicKeyInPEMFormat(std::string_view nnInBase64UrlUnpadded, s
     BUF_MEM_free(bptr);
     RSA_free(rsaKey);
 
-    ap_log_error(LOG_MARK, APLOG_TRACE1, 0, nullptr, "generated pem is:\n %s", pem.c_str());
+    ap_log_rerror(APLOG_MARK, APLOG_TRACE1, 0, r, "generated pem is:\n %s", pem.c_str());
 
     return pem;
 }
 
 // This is the complex case how keys can be provided, we have them as RFC compliant JWK Set in the server response
-std::map<std::string, std::string> extractKeysFromJWKS(rapidjson::Document const& document)
+std::map<std::string, std::string> extractKeysFromJWKS(request_rec* r, rapidjson::Document const& document)
 {
     std::map<std::string, std::string> keys;
-    ap_log_error(LOG_MARK, APLOG_INFO, 0, nullptr, "We have JWK Format");
+    ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, r, "We have JWK Format");
     // we have to convert JWK data to pem's -> exponent and modulo required for RS256/RS512 which is the only supported
     // algo as of today
     const char* KEYS_MEMBER = "keys";
     if (!document.HasMember(KEYS_MEMBER) && document[KEYS_MEMBER].IsArray())
     {
         // not RFC compliant
-        ap_log_error(
-            LOG_MARK,
+        ap_log_rerror(
+            APLOG_MARK,
             APLOG_ERR,
             0,
-            nullptr,
+            r,
             "Returned data is no JWK Set. JSON member <keys> is missing or no array. Could not understand data.");
         return keys;
     }
@@ -173,46 +178,43 @@ std::map<std::string, std::string> extractKeysFromJWKS(rapidjson::Document const
         {
             if (!one_key->IsObject())
             {
-                ap_log_error(LOG_MARK,
-                             APLOG_ERR,
-                             0,
-                             nullptr,
-                             "Returned JWKS contains invalid key entries. <keys> array-entries are not objects. Could "
-                             "not understand data.");
+                ap_log_rerror(APLOG_MARK,
+                              APLOG_ERR,
+                              0,
+                              r,
+                              "Returned JWKS contains invalid key entries. <keys> array-entries are not objects. Could "
+                              "not understand data.");
                 return keys;
             }
             if (!(one_key->HasMember("kid") && one_key->operator[]("kid").IsString()))
             {
-                ap_log_error(LOG_MARK,
-                             APLOG_WARNING,
-                             0,
-                             nullptr,
-                             "Key has no kid, this is not RFC compliant. Ignoring this key.");
+                ap_log_rerror(
+                    APLOG_MARK, APLOG_WARNING, 0, r, "Key has no kid, this is not RFC compliant. Ignoring this key.");
                 continue;
             }
             const char* kid = one_key->operator[]("kid").GetString();
 
             if (!(one_key->HasMember("kty") && strcmp(one_key->operator[]("kty").GetString(), "RSA") == 0))
             {
-                ap_log_error(LOG_MARK, APLOG_INFO, 0, nullptr, "Found non RSA key, ignoring key with id: %s.", kid);
+                ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, r, "Found non RSA key, ignoring key with id: %s.", kid);
                 continue;
             }
             if (!(one_key->HasMember("n") && one_key->operator[]("n").IsString() && one_key->HasMember("e")
                   && one_key->operator[]("e").IsString()))
             {
-                ap_log_error(LOG_MARK,
-                             APLOG_WARNING,
-                             0,
-                             nullptr,
-                             "Non-RFC compliant key entry, n or e are missing. Ignoring this key with id: %s",
-                             kid);
+                ap_log_rerror(APLOG_MARK,
+                              APLOG_WARNING,
+                              0,
+                              r,
+                              "Non-RFC compliant key entry, n or e are missing. Ignoring this key with id: %s",
+                              kid);
                 continue;
             }
 
             const char* n = one_key->operator[]("n").GetString();
             const char* e = one_key->operator[]("e").GetString();
 
-            keys[kid] = getRSAPublicKeyInPEMFormat(n, e);
+            keys[kid] = getRSAPublicKeyInPEMFormat(r, n, e);
         }
     }
 
@@ -220,10 +222,10 @@ std::map<std::string, std::string> extractKeysFromJWKS(rapidjson::Document const
 }
 
 // This is the easy case how keys can be provided, we have directly pem/certs in the server response
-std::map<std::string, std::string> extractKeysFromCert(rapidjson::Document const& document)
+std::map<std::string, std::string> extractKeysFromCert(request_rec* r, rapidjson::Document const& document)
 {
     std::map<std::string, std::string> keys;
-    ap_log_error(LOG_MARK, APLOG_INFO, 0, nullptr, "We have CERT/PEM Format already.");
+    ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, r, "We have CERT/PEM Format already.");
     for (auto it = document.MemberBegin(); it != document.MemberEnd(); ++it)
         if (it->name.IsString() && it->value.IsString())
             keys[it->name.GetString()] = it->value.GetString();
@@ -231,7 +233,7 @@ std::map<std::string, std::string> extractKeysFromCert(rapidjson::Document const
     return keys;
 }
 
-std::map<std::string, std::string> extractKeys(std::string const& content)
+std::map<std::string, std::string> extractKeys(request_rec* r, std::string const& content)
 {
     std::map<std::string, std::string> keys;
 
@@ -240,26 +242,26 @@ std::map<std::string, std::string> extractKeys(std::string const& content)
 
     if (document.HasParseError())
     {
-        ap_log_error(LOG_MARK, APLOG_ERR, 0, nullptr, "Parse error of json data");
+        ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "Parse error of json data");
         return keys;
     }
 
     // we might have certificates/pem or a JWK Set here...
     if (configuration.key_format && configuration.key_format == JWK_KEY_FORMAT)
     {
-        keys = extractKeysFromJWKS(document);
+        keys = extractKeysFromJWKS(r, document);
     }
     else
     {
-        keys = extractKeysFromCert(document);
+        keys = extractKeysFromCert(r, document);
     }
 
     return keys;
 }
 
-std::map<std::string, std::string> getKeysFromServer(const char* url)
+std::map<std::string, std::string> getKeysFromServer(request_rec* r, const char* url)
 {
-    return extractKeys(getContent(url));
+    return extractKeys(r, getContent(r, url));
 }
 } // namespace
 
@@ -267,11 +269,12 @@ std::map<std::string, std::string> getKeysFromServer(const char* url)
 class AuthServer::Impl
 {
 public:
-    [[nodiscard]] std::string getKey(jwt::decoded_jwt<jwt::picojson_traits>& decoded_jwt, std::error_code& error_code)
+    [[nodiscard]] std::string getKey(request_rec* r, jwt::decoded_jwt<jwt::picojson_traits>& decoded_jwt,
+                                     std::error_code& error_code)
     {
         std::lock_guard<std::mutex> lock_guard(mutex_);
 
-        ap_log_error(LOG_MARK, APLOG_INFO, 0, nullptr, "Looking for key with id %s.", decoded_jwt.get_key_id().c_str());
+        ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, r, "Looking for key with id %s.", decoded_jwt.get_key_id().c_str());
 
         cleanUpKeyCacheWhenRequired();
         auto key = findKey(decoded_jwt.get_key_id());
@@ -279,34 +282,33 @@ public:
         {
             if (configuration.use_jku && decoded_jwt.has_header_claim(JWT_JKU_HEADER_NAME))
             {
-                ap_log_error(LOG_MARK,
-                             APLOG_INFO,
-                             0,
-                             nullptr,
-                             "Getting keys from server based on jku header at %s.",
-                             decoded_jwt.get_header_claim(JWT_JKU_HEADER_NAME).as_string().c_str());
+                ap_log_rerror(APLOG_MARK,
+                              APLOG_INFO,
+                              0,
+                              r,
+                              "Getting keys from server based on jku header at %s.",
+                              decoded_jwt.get_header_claim(JWT_JKU_HEADER_NAME).as_string().c_str());
                 // get keys from jku header url
                 auto jku = decoded_jwt.get_header_claim(JWT_JKU_HEADER_NAME).as_string();
-                if (isValidJku(jku))
+                if (isValidJku(r, jku))
                 {
-                    error_code = downloadKeys(jku.c_str());
+                    error_code = downloadKeys(r, jku.c_str());
                 }
                 else
                 {
-                    ap_log_error(LOG_MARK,
-                                 APLOG_ERR,
-                                 0,
-                                 nullptr,
-                                 "received jku (%s) is not in list of trusted_hosts or jku uses insecure protocol.",
-                                 jku.c_str());
+                    ap_log_rerror(APLOG_MARK,
+                                  APLOG_ERR,
+                                  0,
+                                  r,
+                                  "received jku (%s) is not in list of trusted_hosts or jku uses insecure protocol.",
+                                  jku.c_str());
                     error_code = make_error_code(AuthError::untrusted_jku);
                 }
             }
             else
             {
-                ap_log_error(
-                    LOG_MARK, APLOG_INFO, 0, nullptr, "Getting keys from server at %s", configuration.server_url);
-                error_code = downloadKeys(configuration.server_url);
+                ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, r, "Getting keys from server at %s", configuration.server_url);
+                error_code = downloadKeys(r, configuration.server_url);
             }
             if (!error_code)
             {
@@ -332,17 +334,17 @@ private:
     time_t last_clean_ = time(nullptr);
     std::mutex mutex_;
 
-    bool isValidJku(std::string const& jku) const
+    bool isValidJku(request_rec* r, std::string const& jku) const
     {
         if (configuration.trusted_hosts == NULL)
         {
             if (configuration.allow_insecure_jku)
             {
-                ap_log_error(LOG_MARK,
-                             APLOG_ERR,
-                             0,
-                             nullptr,
-                             "Allowing unchecked jku. In production please configure trusted_hosts.");
+                ap_log_rerror(APLOG_MARK,
+                              APLOG_ERR,
+                              0,
+                              r,
+                              "Allowing unchecked jku. In production please configure trusted_hosts.");
                 return true;
             }
             return false;
@@ -361,11 +363,11 @@ private:
                 && (jku.find("http://" + host + ":") != std::string::npos
                     || jku.find("http://" + host + "/") != std::string::npos))
             {
-                ap_log_error(LOG_MARK,
-                             APLOG_WARNING,
-                             0,
-                             nullptr,
-                             "Allowing insecure http jku. In production please configure allow_insecure_jku = false.");
+                ap_log_rerror(APLOG_MARK,
+                              APLOG_WARNING,
+                              0,
+                              r,
+                              "Allowing insecure http jku. In production please configure allow_insecure_jku = false.");
                 return true;
             }
         }
@@ -399,7 +401,7 @@ private:
         return cert->second;
     }
 
-    [[nodiscard]] std::error_code downloadKeys(const char* url)
+    [[nodiscard]] std::error_code downloadKeys(request_rec* r, const char* url)
     {
         auto current_time = time(nullptr);
 
@@ -407,7 +409,7 @@ private:
             return make_error_code(AuthError::unknown_key);
 
         last_request_ = current_time;
-        auto new_keys = getKeysFromServer(url);
+        auto new_keys = getKeysFromServer(r, url);
         if (new_keys.empty())
             return make_error_code(AuthError::cant_get_new_keys);
 
@@ -427,7 +429,7 @@ AuthServer::~AuthServer()
     curl_global_cleanup();
 }
 
-bool AuthServer::verify(char const* token, std::string& user, std::error_code& error_code)
+bool AuthServer::verify(request_rec* r, char const* token, std::string& user, std::error_code& error_code)
 {
     try
     {
@@ -438,24 +440,36 @@ bool AuthServer::verify(char const* token, std::string& user, std::error_code& e
         // check algo before doing more expensive work
         if (!(exact_stricmp("RS256", alg) == 0 || exact_stricmp("RS512", alg) == 0))
         {
-            ap_log_error(LOG_MARK,
-                         APLOG_ERR,
-                         0,
-                         nullptr,
-                         "Sent JWT is signed by alg %s but we only support RS256 and RS512. Rejecting.",
-                         alg);
+            ap_log_rerror(APLOG_MARK,
+                          APLOG_ERR,
+                          0,
+                          r,
+                          "Sent JWT is signed by alg %s but we only support RS256 and RS512. Rejecting.",
+                          alg);
             return false;
         }
 
-        std::string pem_key = impl_->getKey(decoded, error_code);
+        std::string pem_key = impl_->getKey(r, decoded, error_code);
 
         if (error_code)
             return !error_code;
 
-        auto verifier = jwt::verify().with_issuer(configuration.issuer).with_audience(configuration.client_id);
+        auto verifier = jwt::verify();
+
+        // only set issuer to be validated when it is defined
+        if (configuration.issuer)
+        {
+            verifier.with_issuer(configuration.issuer);
+        }
+
+        // only set client_id/aud to be validated when it is defined
+        if (configuration.client_id)
+        {
+            verifier.with_audience(configuration.client_id);
+        }
 
         // creating correct algo for verifier.
-        ap_log_error(LOG_MARK, APLOG_DEBUG, 0, nullptr, "We have algo %s.", alg);
+        ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "We have algo %s.", alg);
         if (exact_stricmp("RS512", alg) == 0)
         {
             verifier.allow_algorithm(jwt::algorithm::rs512{pem_key});
@@ -472,24 +486,24 @@ bool AuthServer::verify(char const* token, std::string& user, std::error_code& e
 
         if (configuration.user_claim)
         {
-            ap_log_error(LOG_MARK,
-                         APLOG_DEBUG,
-                         0,
-                         nullptr,
-                         "Setting user to claim %s with value %s.",
-                         configuration.user_claim,
-                         decoded.get_payload_claim(configuration.user_claim).as_string().c_str());
+            ap_log_rerror(APLOG_MARK,
+                          APLOG_DEBUG,
+                          0,
+                          r,
+                          "Setting user to claim %s with value %s.",
+                          configuration.user_claim,
+                          decoded.get_payload_claim(configuration.user_claim).as_string().c_str());
 
             user = decoded.get_payload_claim(configuration.user_claim).as_string();
         }
         else
         {
-            ap_log_error(LOG_MARK,
-                         APLOG_DEBUG,
-                         0,
-                         nullptr,
-                         "Default: Setting user to claim email with value %s.",
-                         decoded.get_payload_claim("email").as_string().c_str());
+            ap_log_rerror(APLOG_MARK,
+                          APLOG_DEBUG,
+                          0,
+                          r,
+                          "Default: Setting user to claim email with value %s.",
+                          decoded.get_payload_claim("email").as_string().c_str());
 
             // defaults to email
             user = decoded.get_payload_claim("email").as_string();

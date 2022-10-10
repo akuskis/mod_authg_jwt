@@ -12,12 +12,18 @@ Supports server endpoints
 
 
 ## Simple setup
-The following configuration is due in the apache main configuration (e.g. apache2.conf, httpd.conf or similar, e.g. /etc/apache2/apache2.conf).
+The following configuration is due in the apache main configuration (e.g. apache2.conf, httpd.conf or similar, e.g. /etc/apache2/apache2.conf or /etc/httpd/conf/httpd.conf (on RedHat)).
 
 Module loading:
 ```
 LoadModule authg_jwt_module modules/mod_authg_jwt.so
 ```
+
+Setting the log-level of the module (extend existing entry LogLevel):
+```
+LogLevel warn authg_jwt:debug
+```
+
 
 Configuring the module:
 ```
@@ -25,7 +31,7 @@ Configuring the module:
     AuthIssuer accounts.google.com
     AuthServer https://www.googleapis.com/oauth2/v1/certs
     AuthServerUseJku false
-    AuthServerTrustedHosts hostname1, hostname2, hostnameN
+    AuthServerTrustedHosts hostname1,hostname2,hostnameN
     AuthServerAllowInsecureJku false
     AuthServerKeyFormat cert
     UserClaim email
@@ -150,13 +156,13 @@ mkdir build && cd build
 ```
 
 Now compile:
-If you are on the devtoolset compile like this:
+If you are on the devtoolset compile like this (from build folder):
 ```shell script
 export CC=/opt/rh/devtoolset-11/root/usr/bin/gcc 
 export CXX=/opt/rh/devtoolset-11/root/usr/bin/g++
 cmake .. && make mod_authg_jwt
 ```
-if you are on the standard gcc you may simpliy use:
+if you are on the standard gcc you may simpliy use (on build folder):
 ```shell script
 cmake .. && make mod_authg_jwt
 ```
