@@ -2,10 +2,13 @@
 
 #include "AuthServer.hpp"
 #include "Configuration.h"
-#include "Log.hpp"
 
+#include <http_log.h>
 #include <httpd.h>
 
+#ifdef APLOG_USE_MODULE
+APLOG_USE_MODULE(authg_jwt);
+#endif
 
 namespace
 {
@@ -13,7 +16,7 @@ char const* AUTH_PREFIX = "Bearer ";
 int const AUTH_PREFIX_LEN = strlen(AUTH_PREFIX);
 
 // Note: when using standard singleton pattern for C++ Apache never the less instanciates
-// the Singleton multiple times as there are forked processes eacvh running a MOD.
+// the Singleton multiple times as there are forked processes each running a MOD.
 // That's why we better use a global here.
 static AuthServer authServer;
 
@@ -22,9 +25,9 @@ int verify_token(request_rec* r, char const* token)
     std::string user;
     std::error_code error_code;
 
-    if (!authServer.verify(token, user, error_code))
+    if (!authServer.verify(r, token, user, error_code))
     {
-        ap_log_rerror(LOG_MARK, APLOG_ERR, 0, r, "Verification issue: %s", error_code.message().c_str());
+        ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "Verification issue: %s", error_code.message().c_str());
         return HTTP_UNAUTHORIZED;
     }
 
@@ -50,7 +53,7 @@ int auth_check_jwt_hook(request_rec* r)
     char* authorization_header = (char*)apr_table_get(r->headers_in, "Authorization");
     if (!is_valid_auth_header(authorization_header))
     {
-        ap_log_rerror(LOG_MARK, APLOG_ERR, 0, r, "Invalid Authorization->Bearer header");
+        ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "Invalid Authorization->Bearer header");
         return HTTP_UNAUTHORIZED;
     }
 
