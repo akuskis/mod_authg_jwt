@@ -24,7 +24,6 @@ Setting the log-level of the module (extend existing entry LogLevel):
 LogLevel warn authg_jwt:debug
 ```
 
-
 Configuring the module:
 ```
     AuthClientID ***.apps.googleusercontent.com
